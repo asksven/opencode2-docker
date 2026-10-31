@@ -1,0 +1,135 @@
+name: Update Docker Image
+
+# Renovate-driven build for the opencode 2.x image.
+# Detection is declared in renovate.json: Renovate watches the npm
+# "@opencode/cli" package, opens a PR bumping the pinned OPENCODE_VERSION in
+# the Dockerfile, and this workflow builds+pushes when that bump (or another
+# Dockerfile/entrypoint/workflow change) lands on main.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - entrypoint.sh
+      - .github/workflows/update-image.yml
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild and publish even when the OpenCode version is unchanged
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: update-docker-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/asksven/opencode2-docker
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      needs_update: ${{ steps.read.outputs.needs_update }}
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Read pinned OpenCode version from Dockerfile
+        id: read
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^ARG OPENCODE_VERSION=\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' Dockerfile | head -1)"
+          if [ -z "${version}" ]; then
+            echo "No pinned OPENCODE_VERSION (X.Y.Z) found in Dockerfile" >&2
+            exit 1
+          fi
+          # Hard guard: this image MUST stay on the opencode 2.x line. If a 1.x
+          # or 3.x value ever lands here, refuse loudly instead of publishing it.
+          case "${version}" in
+            2.*) ;;
+            *)
+              echo "Refusing to publish non-2.x opencode version '${version}' to this image" >&2
+              exit 1
+              ;;
+          esac
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+          # A source push (e.g. a merged Renovate bump) or forced rebuild always
+          # rebuilds. Manual dispatch without force skips when the target image
+          # and :latest already point at the same manifest.
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.force_rebuild }}" = "true" ]; then
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if docker manifest inspect "${IMAGE}:${version}" > /tmp/target.json 2>/dev/null; then
+            if docker manifest inspect "${IMAGE}:latest" > /tmp/latest.json 2>/dev/null && \
+               diff -q /tmp/target.json /tmp/latest.json > /dev/null; then
+              echo "needs_update=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "needs_update=true" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: check
+    if: ${{ needs.check.outputs.needs_update == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test-image.yml
+    with:
+      opencode_version: ${{ needs.check.outputs.version }}
+
+  publish:
+    needs: [check, test]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.check.result == 'success' &&
+        needs.check.outputs.needs_update == 'true' &&
+        needs.test.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            OPENCODE_VERSION=${{ needs.check.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.check.outputs.version }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect "${{ env.IMAGE }}:${{ needs.check.outputs.version }}"

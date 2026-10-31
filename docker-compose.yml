@@ -1,0 +1,28 @@
+services:
+  opencode2:
+    image: ghcr.io/asksven/opencode2-docker:latest
+    container_name: opencode2
+    #user: "1000"
+    restart: unless-stopped
+    # listen on all interfaces INSIDE the container, make sure to print logs to STDOUT
+    command: opencode serve --hostname 0.0.0.0 --port 4096
+
+    ports:
+      - "127.0.0.1:4096:4096"
+
+    environment:
+      # set in .env
+      TZ: ${TZ}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      # V2 server auth: single password, username is always "opencode".
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD}
+      # Uncomment to raise server log verbosity (V2).
+      #OPENCODE_LOG_LEVEL: DEBUG
+    volumes:
+      - ./data/share:/home/opencode/.local/share/opencode
+      - ./data/state:/home/opencode/.local/state/opencode
+      - ./data/config:/home/opencode/.config/opencode
+      # Grants the container effectively root-level control over the host.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # If opencode will be used from VSCode we need to make sure that the directory "outside" is equal to the directory "inside" the container.
+      - /home/sven/opencode/projects:/home/sven/opencode/projects

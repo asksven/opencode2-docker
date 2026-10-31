@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["regex"],
+  "regexManagers": [
+    {
+      "description": "Track the opencode 2.x version pinned in the Dockerfile ARG",
+      "fileMatch": ["(^|/)Dockerfile$"],
+      "matchStrings": [
+        "^ARG OPENCODE_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\s*$"
+      ],
+      "depNameTemplate": "@opencode/cli",
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Restrict to the opencode 2.x line; 1.x ships as the separate opencode-ai package and separate image",
+      "matchPackageNames": ["@opencode/cli"],
+      "allowedVersions": ">=2.0.0 <3.0.0"
+    }
+  ]
+}

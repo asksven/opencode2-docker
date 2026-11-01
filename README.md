@@ -52,6 +52,20 @@ For persistent data and configuration, the following volumes can be mounted:
 - `./data/state:/home/opencode/.local/state/opencode`
 - `./data/config:/home/opencode/.config/opencode` - Configuration files, including `opencode.json` (config paths are unchanged in V2)
 
+### Default security config
+
+The image ships a sane V2 default config at `/etc/opencode/opencode.json` (the V2 *system* config dir, which loads
+for all users and overrides global/project config; it is **not** overwritten by the `./data/config` volume). It sets
+two permissions so every session starts safe:
+
+- `external_directory` -> `ask`: never silently access tools/paths outside the session repo. V2's default is to allow
+  this; this rule restores a prompt before any outside-worktree read/edit/shell.
+- `execute` -> `allow`: Code Mode (the `execute` tool) explicitly enabled. Only a `deny` removes it; this makes the
+  on-by-default state explicit.
+
+Override per-session by adding rules in your `./data/config/opencode.json` (or use `deny` on `external_directory`
+for a hard block in unattended mode).
+
 ### Docker CLI Access
 
 The image includes the Docker CLI, Compose v2 plugin, and Buildx plugin, but does not include a Docker daemon. To

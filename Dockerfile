@@ -136,6 +136,27 @@ RUN adduser --disabled-password --gecos "" opencode \
 ENV UV_CACHE_DIR=/home/opencode/.cache/uv
 
 # ---------------------------------------------------------------------------
+# Sane V2 defaults, applied to every session. Written to /etc/opencode (the
+# V2 SYSTEM config dir): it loads for all users and overrides global+project
+# config, and is NOT clobbered by the user data/config volume (which mounts
+# over ~/.config, a lower-precedence global dir).
+#   1. Never silently access tools/paths outside the session repo: ask before
+#      any external_directory access (V2 default allows it - bad default).
+#   2. Code Mode (the `execute` tool) explicitly allowed - only a deny removes
+#      it, this makes the ON state explicit and robust.
+# ---------------------------------------------------------------------------
+RUN mkdir -p /etc/opencode \
+    && cat > /etc/opencode/opencode.json <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permissions": [
+    { "action": "external_directory", "resource": "*", "effect": "ask" },
+    { "action": "execute", "resource": "*", "effect": "allow" }
+  ]
+}
+EOF
+
+# ---------------------------------------------------------------------------
 # Fail the build loudly if any tool is missing or broken.
 # ---------------------------------------------------------------------------
 RUN set -euo pipefail; \
